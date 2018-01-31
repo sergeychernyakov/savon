@@ -133,6 +133,7 @@ module Savon
           host_url = URI.parse(@globals[:host])
           url.host = host_url.host
           url.port = host_url.port
+          url.scheme = host_url.scheme
         end
       end
     end
