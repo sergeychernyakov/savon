@@ -5,11 +5,16 @@ require "savon/http_error"
 
 module Savon
   class Response
+    CRLF = /\r\n/
+    WSP  = /[#{%Q|\x9\x20|}]/
 
     def initialize(http, globals, locals)
       @http    = http
       @globals = globals
       @locals  = locals
+      @attachments = []
+      @xml     = ''
+      @has_parsed_body = false
 
       build_soap_and_http_errors!
       raise_soap_and_http_errors! if @globals[:raise_errors]
@@ -49,12 +54,17 @@ module Savon
       result.kind_of?(Array) ? result.compact : [result].compact
     end
 
-    def hash
-      @hash ||= nori.parse(xml)
+    def full_hash
+      @full_hash ||= nori.parse(xml)
     end
 
     def xml
-      @http.body
+      if multipart?
+        parse_body unless @has_parsed_body
+        @xml
+      else
+        @http.body
+      end
     end
 
     alias_method :to_xml, :xml
@@ -69,13 +79,49 @@ module Savon
     end
 
     def find(*path)
-      envelope = nori.find(hash, 'Envelope')
+      envelope = nori.find(full_hash, 'Envelope')
       raise_invalid_response_error! unless envelope.is_a?(Hash)
 
       nori.find(envelope, *path)
     end
 
+    def attachments
+      if multipart?
+        parse_body unless @has_parsed_body
+        @attachments
+      else
+        []
+      end
+    end
+
+    def multipart?
+      !(http.headers['content-type'] =~ /^multipart/im).nil?
+    end
+
     private
+
+    def boundary
+      return unless multipart?
+      Mail::Field.new('content-type', http.headers['content-type']).parameters['boundary']
+    end
+
+    def parse_body
+      http.body.force_encoding Encoding::ASCII_8BIT
+      parts = http.body.split(/(?:\A|\r\n)--#{Regexp.escape(boundary)}(?=(?:--)?\s*$)/)
+      parts[1..-1].to_a.each_with_index do |part, index|
+        header_part, body_part = part.lstrip.split(/#{CRLF}#{CRLF}|#{CRLF}#{WSP}*#{CRLF}(?!#{WSP})/m, 2)
+        section = Mail::Part.new(
+          body: body_part
+        )
+        section.header = header_part
+        if index == 0
+          @xml = section.body.to_s
+        else
+          @attachments << section
+        end
+      end
+      @has_parsed_body = true
+    end
 
     def build_soap_and_http_errors!
       @soap_fault = SOAPFault.new(@http, nori, xml) if soap_fault?

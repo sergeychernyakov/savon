@@ -4,7 +4,7 @@ require "integration/support/server"
 require "json"
 require "ostruct"
 
-describe Savon::Operation do
+RSpec.describe Savon::Operation do
 
   let(:globals) { Savon::GlobalOptions.new(:endpoint => @server.url(:repeat), :log => false) }
   let(:wsdl)    { Wasabi::Document.new Fixture.wsdl(:taxcloud) }
@@ -109,7 +109,7 @@ describe Savon::Operation do
     it "sets the Content-Length header" do
       # XXX: probably the worst spec ever written. refactor! [dh, 2013-01-05]
       http_request = HTTPI::Request.new
-      http_request.headers.expects(:[]=).with("Content-Length", "312")
+      http_request.headers.expects(:[]=).with("Content-Length", "723")
       Savon::SOAPRequest.any_instance.expects(:build).returns(http_request)
 
       new_operation(:verify_address, wsdl, globals).call
@@ -166,40 +166,28 @@ describe Savon::Operation do
       expect(actual_soap_action).to eq(%("authenticate"))
     end
 
-    it "returns a Savon::Multipart::Response if available and requested globally" do
-      globals.multipart true
-
-      with_multipart_mocked do
-        operation = new_operation(:authenticate, no_wsdl, globals)
-        response = operation.call
-
-        expect(response).to be_a(Savon::Multipart::Response)
+    it "handle multipart response" do
+      globals.endpoint @server.url(:multipart)
+      operation = new_operation(:example, no_wsdl, globals)
+      response = operation.call do
+        attachments [
+          { filename: 'x1.xml', content: '<xml>abc</xml>'},
+          { filename: 'x2.xml', content: '<xml>cde</xml>'},
+        ]
       end
+
+      expect(response.multipart?).to be true
+      expect(response.header).to eq 'response header'
+      expect(response.body).to eq 'response body'
+      expect(response.attachments.first.content_id).to include('attachment1')
     end
 
-    it "returns a Savon::Multipart::Response if available and requested locally" do
-      with_multipart_mocked do
-        operation = new_operation(:authenticate, no_wsdl, globals)
-        response = operation.call(:multipart => true)
+    it "simple request is not multipart" do
+      operation = new_operation(:example, no_wsdl, globals)
+      response = operation.call
 
-        expect(response).to be_a(Savon::Multipart::Response)
-      end
-    end
-
-    it "raises if savon-multipart is not available and it was requested globally" do
-      globals.multipart true
-
-      operation = new_operation(:authenticate, no_wsdl, globals)
-
-      expect { operation.call }.
-        to raise_error RuntimeError, /Unable to find Savon::Multipart/
-    end
-
-    it "raises if savon-multipart is not available and it was requested locally" do
-      operation = new_operation(:authenticate, no_wsdl, globals)
-
-      expect { operation.call(:multipart => true) }.
-        to raise_error RuntimeError, /Unable to find Savon::Multipart/
+      expect(response.multipart?).to be false
+      expect(response.attachments).to be_empty
     end
   end
 
@@ -210,18 +198,6 @@ describe Savon::Operation do
 
       expect(request.body).to include('<tns:VerifyAddress></tns:VerifyAddress>')
     end
-  end
-
-  def with_multipart_mocked
-    multipart_response = Class.new { def initialize(*args); end }
-    multipart_mock = Module.new
-    multipart_mock.const_set('Response', multipart_response)
-
-    Savon.const_set('Multipart', multipart_mock)
-
-    yield
-  ensure
-    Savon.send(:remove_const, :Multipart) if Savon.const_defined? :Multipart
   end
 
   def inspect_request(response)

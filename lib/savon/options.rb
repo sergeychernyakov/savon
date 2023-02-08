@@ -79,12 +79,13 @@ module Savon
         :namespaces                  => {},
         :logger                      => Logger.new($stdout),
         :log                         => false,
+        :log_headers                 => true,
         :filters                     => [],
         :pretty_print_xml            => false,
         :raise_errors                => true,
         :strip_namespaces            => true,
         :delete_namespace_attributes => false,
-        :convert_response_tags_to    => lambda { |tag| tag.snakecase.to_sym},
+        :convert_response_tags_to    => lambda { |tag| StringUtils.snakecase(tag).to_sym},
         :convert_attributes_to       => lambda { |k,v| [k,v] },
         :multipart                   => false,
         :adapter                     => nil,
@@ -156,6 +157,11 @@ module Savon
       @options[:read_timeout] = read_timeout
     end
 
+    # Write timeout in seconds.
+    def write_timeout(write_timeout)
+      @options[:write_timeout] = write_timeout
+    end
+
     # The encoding to use. Defaults to "UTF-8".
     def encoding(encoding)
       @options[:encoding] = encoding
@@ -214,6 +220,11 @@ module Savon
       @options[:logger].level = levels[level]
     end
 
+    # To log headers or not.
+    def log_headers(log_headers)
+      @options[:log_headers] = log_headers
+    end
+
     # A list of XML tags to filter from logged SOAP messages.
     def filters(*filters)
       @options[:filters] = filters.flatten
@@ -227,6 +238,16 @@ module Savon
     # Specifies the SSL version to use.
     def ssl_version(version)
       @options[:ssl_version] = version
+    end
+
+    # Specifies the SSL version to use.
+    def ssl_min_version(version)
+      @options[:ssl_min_version] = version
+    end
+
+    # Specifies the SSL version to use.
+    def ssl_max_version(version)
+      @options[:ssl_max_version] = version
     end
 
     # Whether and how to to verify the connection.
@@ -395,6 +416,40 @@ module Savon
     # Attributes for the SOAP message tag.
     def attributes(attributes)
       @options[:attributes] = attributes
+    end
+
+    # Attachments for the SOAP message (https://www.w3.org/TR/SOAP-attachments)
+    #
+    # should pass an Array or a Hash; items should be path strings or
+    #  { filename: 'file.name', content: 'content' } objects
+    # The Content-ID in multipart message sections will be the filename or the key if Hash is given
+    #
+    # usage examples:
+    #
+    #    response = client.call :operation1 do
+    #      message param1: 'value'
+    #      attachments [
+    #        { filename: 'x1.xml', content: '<xml>abc</xml>'},
+    #        { filename: 'x2.xml', content: '<xml>abc</xml>'}
+    #      ]
+    #    end
+    #    # Content-ID will be x1.xml and x2.xml
+    #
+    #    response = client.call :operation1 do
+    #      message param1: 'value'
+    #      attachments 'x1.xml' => '/tmp/1281ab7d7d.xml', 'x2.xml' => '/tmp/4c5v8e833a.xml'
+    #    end
+    #    # Content-ID will be x1.xml and x2.xml
+    #
+    #    response = client.call :operation1 do
+    #      message param1: 'value'
+    #      attachments [ '/tmp/1281ab7d7d.xml', '/tmp/4c5v8e833a.xml']
+    #    end
+    #    # Content-ID will be 1281ab7d7d.xml and 4c5v8e833a.xml
+    #
+    # The Content-ID is important if you want to refer to the attachments from the SOAP request
+    def attachments(attachments)
+      @options[:attachments] = attachments
     end
 
     # Value of the SOAPAction HTTP header.

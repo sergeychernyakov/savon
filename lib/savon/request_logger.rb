@@ -24,21 +24,26 @@ module Savon
       @globals[:log]
     end
 
+    def log_headers?
+      @globals[:log_headers]
+    end
+
     private
 
     def log_request(request)
       logger.info  { "SOAP request: #{request.url}" }
-      logger.info  { headers_to_log(request.headers) }
+      logger.info  { headers_to_log(request.headers) } if log_headers?
       logger.debug { body_to_log(request.body) }
     end
 
     def log_response(response)
       logger.info  { "SOAP response (status #{response.code})" }
+      logger.debug { headers_to_log(response.headers) } if log_headers?
       logger.debug { body_to_log(response.body) }
     end
 
     def headers_to_log(headers)
-      headers.map { |key, value| "#{key}: #{value}" }.join(", ")
+      headers.map { |key, value| "#{key}: #{value}" }.join("\n")
     end
 
     def body_to_log(body)

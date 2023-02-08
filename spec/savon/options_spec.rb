@@ -5,7 +5,7 @@ require "json"
 require "ostruct"
 require "logger"
 
-describe "Options" do
+RSpec.describe "Options" do
 
   before :all do
     @server = IntegrationServer.run
@@ -220,6 +220,17 @@ describe "Options" do
       expect(response.http.body).to include("<user>lea</user>")
       expect(response.http.body).to include("<password>top-secret</password>")
     end
+
+    it "qualifies elements embedded in complex types" do
+      client = new_client(:endpoint => @server.url(:repeat),
+                          :wsdl => Fixture.wsdl(:elements_in_types))
+      msg = {":TopLevelTransaction"=>{":Qualified"=>"A Value"}}
+
+      response = client.call(:top_level_transaction, :message => msg)
+
+      expect(response.http.body.scan(/<tns:Qualified>/).count).to eq(1)
+    end
+
   end
 
   context "global :env_namespace" do
@@ -388,11 +399,49 @@ describe "Options" do
     end
   end
 
+  context "global :log_headers" do
+    it "instructs Savon to log SOAP requests and responses headers" do
+      stdout = mock_stdout {
+        client = new_client(:endpoint => @server.url, :log => true)
+        client.call(:authenticate)
+      }
+      soap_header = stdout.string.downcase.include? "content-type"
+      expect(soap_header).to be true
+    end
+
+    it "stops Savon from logging SOAP requests and responses headers" do
+      stdout = mock_stdout {
+        client = new_client(:endpoint => @server.url, :log => true, :log_headers => false)
+        client.call(:authenticate)
+      }
+      soap_header = stdout.string.include? "Content-Type"
+      expect(soap_header).to be false
+    end
+  end
+
   context "global :ssl_version" do
     it "sets the SSL version to use" do
       HTTPI::Auth::SSL.any_instance.expects(:ssl_version=).with(:TLSv1).twice
 
       client = new_client(:endpoint => @server.url, :ssl_version => :TLSv1)
+      client.call(:authenticate)
+    end
+  end
+
+  context "global :ssl_min_version" do
+    it "sets the SSL min_version to use" do
+      HTTPI::Auth::SSL.any_instance.expects(:min_version=).with(:TLS1_2).twice
+
+      client = new_client(:endpoint => @server.url, :ssl_min_version => :TLS1_2)
+      client.call(:authenticate)
+    end
+  end
+
+  context "global :ssl_max_version" do
+    it "sets the SSL max_version to use" do
+      HTTPI::Auth::SSL.any_instance.expects(:max_version=).with(:TLS1_2).twice
+
+      client = new_client(:endpoint => @server.url, :ssl_max_version => :TLS1_2)
       client.call(:authenticate)
     end
   end
@@ -795,13 +844,13 @@ describe "Options" do
     it "can be changed to not strip any namespaces" do
       client = new_client(
         :endpoint => @server.url(:repeat),
-        :convert_response_tags_to => lambda { |tag| tag.snakecase },
+        :convert_response_tags_to => lambda { |tag| Savon::StringUtils.snakecase(tag) },
         :strip_namespaces => false
       )
 
       response = client.call(:authenticate, :xml => Fixture.response(:authentication))
 
-      expect(response.hash["soap:envelope"]["soap:body"]).to include("ns2:authenticate_response")
+      expect(response.full_hash["soap:envelope"]["soap:body"]).to include("ns2:authenticate_response")
     end
   end
 
@@ -828,10 +877,10 @@ describe "Options" do
 
   context "global :convert_response_tags_to" do
     it "changes how XML tags from the SOAP response are translated into Hash keys" do
-      client = new_client(:endpoint => @server.url(:repeat), :convert_response_tags_to => lambda { |tag| tag.snakecase.upcase })
+      client = new_client(:endpoint => @server.url(:repeat), :convert_response_tags_to => lambda { |tag| Savon::StringUtils.snakecase(tag).upcase })
       response = client.call(:authenticate, :xml => Fixture.response(:authentication))
 
-      expect(response.hash["ENVELOPE"]["BODY"]).to include("AUTHENTICATE_RESPONSE")
+      expect(response.full_hash["ENVELOPE"]["BODY"]).to include("AUTHENTICATE_RESPONSE")
     end
 
     it "accepts a block in the block-based interface" do
@@ -839,14 +888,14 @@ describe "Options" do
         globals.log                      false
         globals.wsdl                     Fixture.wsdl(:authentication)
         globals.endpoint                 @server.url(:repeat)
-        globals.convert_response_tags_to { |tag| tag.snakecase.upcase }
+        globals.convert_response_tags_to { |tag| Savon::StringUtils.snakecase(tag).upcase }
       end
 
       response = client.call(:authenticate) do |locals|
         locals.xml Fixture.response(:authentication)
       end
 
-      expect(response.hash["ENVELOPE"]["BODY"]).to include("AUTHENTICATE_RESPONSE")
+      expect(response.full_hash["ENVELOPE"]["BODY"]).to include("AUTHENTICATE_RESPONSE")
     end
   end
 
@@ -1066,7 +1115,7 @@ describe "Options" do
 
   context "request :response_parser" do
     it "instructs Nori to change the response parser" do
-      nori = Nori.new(:strip_namespaces => true, :convert_tags_to => lambda { |tag| tag.snakecase.to_sym })
+      nori = Nori.new(:strip_namespaces => true, :convert_tags_to => lambda { |tag| Savon::StringUtils.snakecase(tag).to_sym })
       Nori.expects(:new).with { |options| options[:parser] == :nokogiri }.returns(nori)
 
       client = new_client(:endpoint => @server.url(:repeat))

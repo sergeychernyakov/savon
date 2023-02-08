@@ -6,9 +6,15 @@ require "savon/builder"
 require "savon/response"
 require "savon/request_logger"
 require "savon/http_error"
+require "mail"
 
 module Savon
   class Operation
+
+    SOAP_REQUEST_TYPE = {
+      1 => "text/xml",
+      2 => "application/soap+xml"
+    }
 
     def self.create(operation_name, wsdl, globals)
       if wsdl.document?
@@ -67,21 +73,7 @@ module Savon
     private
 
     def create_response(response)
-      if multipart_supported?
-        Multipart::Response.new(response, @globals, @locals)
-      else
-        Response.new(response, @globals, @locals)
-      end
-    end
-
-    def multipart_supported?
-      return false unless @globals[:multipart] || @locals[:multipart]
-
-      if Savon.const_defined? :Multipart
-        true
-      else
-        raise 'Unable to find Savon::Multipart. Make sure the savon-multipart gem is installed and loaded.'
-      end
+      Response.new(response, @globals, @locals)
     end
 
     def set_locals(locals, block)
@@ -108,6 +100,15 @@ module Savon
       request.url = endpoint
       request.body = builder.to_s
 
+      if builder.multipart
+        request.gzip
+        request.headers["Content-Type"] = ["multipart/related",
+                                           "type=\"#{SOAP_REQUEST_TYPE[@globals[:soap_version]]}\"",
+                                           "start=\"#{builder.multipart[:start]}\"",
+                                           "boundary=\"#{builder.multipart[:multipart_boundary]}\""].join("; ")
+        request.headers["MIME-Version"] = "1.0"
+      end
+
       # TODO: could HTTPI do this automatically in case the header
       #       was not specified manually? [dh, 2013-01-04]
       request.headers["Content-Length"] = request.body.bytesize.to_s
@@ -120,11 +121,11 @@ module Savon
       return if @locals.include?(:soap_action) && !@locals[:soap_action]
 
       # get the soap_action from local options
-      soap_action = @locals[:soap_action]
+      @locals[:soap_action] ||
       # with no local option, but a wsdl, ask it for the soap_action
-      soap_action ||= @wsdl.soap_action(@name.to_sym) if @wsdl.document?
+      @wsdl.document? && @wsdl.soap_action(@name.to_sym) ||
       # if there is no soap_action up to this point, fallback to a simple default
-      soap_action ||= Gyoku.xml_tag(@name, :key_converter => @globals[:convert_request_keys_to])
+      Gyoku.xml_tag(@name, :key_converter => @globals[:convert_request_keys_to])
     end
 
     def endpoint
